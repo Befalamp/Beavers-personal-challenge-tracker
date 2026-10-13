@@ -135,6 +135,37 @@
     max-width:900px; margin-left:auto; margin-right:auto;
   }
   .footer-logo{ display:block; margin:18px auto 8px; height:22px; width:auto; opacity:0.85; }
+
+  .hidden{ display:none !important; }
+  .login-wrap{
+    max-width:360px; margin:28px auto 0; background:#fff; border-radius:16px;
+    padding:22px 20px; box-shadow:0 3px 0 var(--card-shadow);
+  }
+  .login-wrap h2{
+    font-family:'Baloo 2','Nunito',sans-serif; font-weight:800; font-size:1.2rem;
+    margin:0 0 4px; color:var(--ink);
+  }
+  .login-wrap p{ margin:0 0 14px; font-size:0.85rem; color:#5c7a77; font-weight:700; }
+  .login-wrap input{
+    width:100%; border:2px solid #cfe4e1; border-radius:12px; padding:11px 14px;
+    font-size:1rem; font-family:inherit; font-weight:700; color:var(--ink);
+    background:#fff; margin-bottom:10px;
+  }
+  .login-wrap input:focus{ outline:none; border-color:var(--teal); }
+  .login-wrap button.primary{
+    width:100%; background:var(--teal); color:#fff; border:none; border-radius:12px;
+    padding:12px; font-weight:800; font-size:1rem; font-family:inherit; cursor:pointer;
+    box-shadow:0 3px 0 var(--teal-dark);
+  }
+  .login-wrap button.primary:active{ transform:translateY(2px); box-shadow:none; }
+  .login-wrap button.primary:disabled{ opacity:0.6; }
+  .login-error{ color:var(--danger); font-size:0.85rem; font-weight:700; min-height:1.2em; margin:2px 0 10px; }
+  .login-error.ok{ color:var(--teal-dark); }
+  .link-btn{
+    background:none; border:none; color:var(--teal-dark); font-weight:700; font-family:inherit;
+    font-size:0.85rem; cursor:pointer; padding:6px 0; text-decoration:underline;
+  }
+  .signout-row{ text-align:center; margin-top:4px; }
 </style>
 
 <div id="beaver-app">
@@ -144,17 +175,42 @@
     <p>Tap a name to open it, tap a week once it's done</p>
   </div>
 
-  <div class="add-beaver-row">
-    <input id="new-beaver-name" placeholder="Add a Beaver's name" />
-    <button id="add-beaver-btn">+</button>
+  <div id="login-panel" class="login-wrap hidden">
+    <h2>Leader sign in</h2>
+    <p>Use the email and password you were given.</p>
+    <input id="login-email" type="email" inputmode="email" autocomplete="username" placeholder="Email" />
+    <input id="login-password" type="password" autocomplete="current-password" placeholder="Password" />
+    <div id="login-error" class="login-error"></div>
+    <button id="login-btn" class="primary">Sign in</button>
+    <div class="signout-row"><button id="reset-btn" class="link-btn" type="button">Forgot password?</button></div>
   </div>
 
-  <div id="beaver-list" class="beaver-list"></div>
+  <div id="tracker-body" class="hidden">
+    <div class="add-beaver-row">
+      <input id="new-beaver-name" placeholder="Add a Beaver's name" />
+      <button id="add-beaver-btn">+</button>
+    </div>
+
+    <div id="beaver-list" class="beaver-list"></div>
+  </div>
   <img class="footer-logo" src="ellesmere-logo.png" alt="Ellesmere Town Scouts">
-  <div class="footer-note" id="status-note">Data is shared with anyone using this tracker</div>
+  <div class="footer-note" id="status-note">Shared with signed-in leaders only</div>
+  <div class="signout-row"><button id="signout-btn" class="link-btn hidden" type="button">Sign out</button></div>
 </div>
 
-<script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail }
+  from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDU-GMF6U0yHLI1O2rJxU8HjV2QeheivbI",
+  authDomain: "beaver-personal-challenge.firebaseapp.com",
+  projectId: "beaver-personal-challenge",
+  appId: "1:581303881401:web:1843300f5876e7ad955568"
+};
+const auth = getAuth(initializeApp(firebaseConfig));
+
 (function(){
   const DB_URL = 'https://beaver-personal-challenge-default-rtdb.europe-west1.firebasedatabase.app';
   const DATA_PATH = DB_URL + '/beaverChallengeData.json';
@@ -162,7 +218,11 @@
   let state = { beavers: [] };
   let openId = null;
   let confirmingRemoveId = null;
-  let statusMsg = 'Data is shared with anyone using this tracker';
+  const DEFAULT_MSG = 'Shared with signed-in leaders only';
+  let statusMsg = DEFAULT_MSG;
+  let loaded = false;       // true only after a successful read; saves are refused until then
+  let pendingSaves = 0;
+  let pollTimer = null;
 
   const listEl = document.getElementById('beaver-list');
   const addInput = document.getElementById('new-beaver-name');
@@ -171,34 +231,54 @@
   function uid(){ return 'b' + Math.random().toString(36).slice(2,9); }
   function accentFor(index){ return ACCENTS[index % ACCENTS.length]; }
 
+  async function authedUrl(){
+    const user = auth.currentUser;
+    if(!user) throw new Error('not signed in');
+    const token = await user.getIdToken();   // refreshed automatically when it expires
+    return DATA_PATH + '?auth=' + encodeURIComponent(token);
+  }
+
   async function save(){
+    if(!loaded){
+      // A failed read must never be followed by a write, or an empty list would overwrite saved data.
+      statusMsg = "Not saved — the saved data hasn't loaded yet, check your connection";
+      render();
+      return;
+    }
+    pendingSaves++;
     try{
-      const res = await fetch(DATA_PATH, {
+      const res = await fetch(await authedUrl(), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(state)
       });
       if(!res.ok) throw new Error('HTTP ' + res.status);
-      if(statusMsg !== 'Data is shared with anyone using this tracker'){
-        statusMsg = 'Data is shared with anyone using this tracker';
+      if(statusMsg !== DEFAULT_MSG){
+        statusMsg = DEFAULT_MSG;
         render();
       }
     }catch(e){
       console.error('save failed', e);
       statusMsg = "Couldn't save just now — check your connection and try again";
       render();
+    }finally{
+      pendingSaves--;
     }
   }
 
   async function load(){
     try{
-      const res = await fetch(DATA_PATH);
+      const res = await fetch(await authedUrl());
       if(!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
       if(data) state = Object.assign({ beavers: [] }, data);
+      loaded = true;
+      statusMsg = DEFAULT_MSG;
     }catch(e){
       console.error('load failed', e);
-      statusMsg = "Couldn't load saved data — check your connection";
+      statusMsg = /HTTP (401|403)/.test(String(e.message))
+        ? "This account isn't allowed to open the data — ask Beth to add you"
+        : "Couldn't load saved data — check your connection";
     }
     render();
   }
@@ -337,7 +417,12 @@
   function addBeaver(){
     const name = addInput.value.trim();
     if(!name) return;
-    const b = { id: uid(), name, c1Name:'', c2Name:'', c1:[false,false,false,false], c2:[false,false,false,false] };
+    if(!loaded){
+      statusMsg = "Wait for the saved data to load before adding anyone";
+      render();
+      return;
+    }
+    const b ={ id: uid(), name, c1Name:'', c2Name:'', c1:[false,false,false,false], c2:[false,false,false,false] };
     state.beavers.push(b);
     openId = b.id;
     addInput.value = '';
@@ -346,11 +431,91 @@
   addBtn.onclick = addBeaver;
   addInput.addEventListener('keydown', e => { if(e.key === 'Enter') addBeaver(); });
 
-  load();
-  setInterval(() => {
+  // ---- sign-in ----
+  const loginPanel = document.getElementById('login-panel');
+  const trackerBody = document.getElementById('tracker-body');
+  const signoutBtn = document.getElementById('signout-btn');
+  const emailInput = document.getElementById('login-email');
+  const pwInput = document.getElementById('login-password');
+  const loginBtn = document.getElementById('login-btn');
+  const loginError = document.getElementById('login-error');
+  const resetBtn = document.getElementById('reset-btn');
+
+  function setLoginMsg(text, ok){
+    loginError.textContent = text;
+    loginError.className = 'login-error' + (ok ? ' ok' : '');
+  }
+
+  function friendlyAuthError(e){
+    switch(e && e.code){
+      case 'auth/invalid-credential':
+      case 'auth/wrong-password':
+      case 'auth/user-not-found': return "That email or password isn't right";
+      case 'auth/invalid-email': return "That doesn't look like an email address";
+      case 'auth/too-many-requests': return "Too many tries — wait a few minutes and try again";
+      case 'auth/network-request-failed': return "No connection — check your internet";
+      case 'auth/operation-not-allowed': return "Email sign-in isn't switched on in Firebase yet";
+      default: return "Couldn't sign in — try again";
+    }
+  }
+
+  async function doLogin(){
+    const email = emailInput.value.trim();
+    const pw = pwInput.value;
+    if(!email || !pw){ setLoginMsg('Enter your email and password'); return; }
+    loginBtn.disabled = true;
+    setLoginMsg('');
+    try{
+      await signInWithEmailAndPassword(auth, email, pw);
+      pwInput.value = '';
+    }catch(e){
+      console.error('sign in failed', e);
+      setLoginMsg(friendlyAuthError(e));
+    }
+    loginBtn.disabled = false;
+  }
+
+  async function doReset(){
+    const email = emailInput.value.trim();
+    if(!email){ setLoginMsg('Type your email above first, then tap Forgot password'); return; }
+    try{
+      await sendPasswordResetEmail(auth, email);
+      setLoginMsg('If that account exists, a reset email is on its way', true);
+    }catch(e){
+      console.error('reset failed', e);
+      setLoginMsg(friendlyAuthError(e));
+    }
+  }
+
+  loginBtn.onclick = doLogin;
+  resetBtn.onclick = doReset;
+  pwInput.addEventListener('keydown', e => { if(e.key === 'Enter') doLogin(); });
+  signoutBtn.onclick = () => { signOut(auth); };
+
+  function poll(){
+    if(pendingSaves > 0) return;
     if(document.activeElement && document.activeElement.tagName === 'INPUT') return;
     load();
-  }, 4000);
+  }
+
+  onAuthStateChanged(auth, (user) => {
+    const signedIn = !!user;
+    loginPanel.classList.toggle('hidden', signedIn);
+    trackerBody.classList.toggle('hidden', !signedIn);
+    signoutBtn.classList.toggle('hidden', !signedIn);
+    if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+    loaded = false;
+    openId = null;
+    confirmingRemoveId = null;
+    if(signedIn){
+      statusMsg = DEFAULT_MSG;
+      load();
+      pollTimer = setInterval(poll, 4000);
+    }else{
+      state = { beavers: [] };   // don't keep anyone's data in memory once signed out
+      listEl.innerHTML = '';
+    }
+  });
 
   if('serviceWorker' in navigator){
     navigator.serviceWorker.register('sw.js').catch(e => console.error('SW registration failed', e));
