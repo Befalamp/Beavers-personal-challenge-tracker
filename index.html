@@ -115,8 +115,6 @@
     font-family:inherit; font-size:0.8rem; font-weight:800; padding:5px 6px; flex-shrink:0;
   }
   .weeks-select:focus{ outline:none; border-color:var(--teal); }
-  .week-tick.oneoff{ aspect-ratio:auto; height:58px; font-size:1.6rem; }
-  .week-tick.oneoff .wk-num{ font-size:0.7rem; }
 
   .task-name-input{
     width:100%; border:none; border-bottom:2px solid #eee; background:transparent;
@@ -129,8 +127,6 @@
   .challenge-block{ margin-top:12px; }
   .challenge-block:first-child{ margin-top:6px; }
   .week-row{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
-  .week-row.cols-1{ grid-template-columns:1fr; }
-  .week-row.cols-3{ grid-template-columns:repeat(3,1fr); }
   .week-tick{
     aspect-ratio:1; border-radius:12px; border:2px solid var(--line); background:#f8faf7;
     display:flex; align-items:center; justify-content:center; font-size:1.25rem; font-weight:800;
@@ -479,11 +475,11 @@ const auth = getAuth(initializeApp(firebaseConfig));
     block.appendChild(head);
 
     const row = document.createElement('div');
-    row.className = 'week-row' + (len === 1 ? ' cols-1' : (len === 5 || len === 6 ? ' cols-3' : ''));
+    row.className = 'week-row';
     for(let i=0;i<len;i++){
       const cell = document.createElement('div');
       const ticked = beaver[key][i];
-      cell.className = 'week-tick' + (len === 1 ? ' oneoff' : '') + (ticked ? ' ticked ' + key : '');
+      cell.className = 'week-tick' + (ticked ? ' ticked ' + key : '');
       cell.innerHTML = '<span class="wk-num">' + (len === 1 ? 'Done' : 'Wk' + (i+1)) + '</span>' + (ticked ? '✓' : '');
       cell.onclick = (e) => {
         e.stopPropagation();
