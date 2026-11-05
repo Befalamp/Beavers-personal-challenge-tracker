@@ -258,7 +258,10 @@
   </details>
   <img class="footer-logo" src="ellesmere-logo.png" alt="Ellesmere Town Scouts">
   <div class="footer-note" id="status-note">Shared with signed-in leaders only</div>
-  <div class="signout-row"><button id="signout-btn" class="link-btn hidden" type="button">Sign out</button></div>
+  <div class="signout-row">
+    <button id="signout-btn" class="link-btn hidden" type="button">Sign out</button>
+    <button id="manage-btn" class="link-btn hidden" type="button" aria-label="Manage leaders" style="text-decoration:none;opacity:0.5">⚙</button>
+  </div>
 </div>
 
 <script type="module">
@@ -633,6 +636,13 @@ const secAuth = getAuth(initializeApp(firebaseConfig, 'secondary'));
   // ---- leaders (admin only) ----
   const ADMIN_EMAIL = 'bethan.forrester@gmail.com';
   const adminPanel = document.getElementById('admin-panel');
+  const manageBtn = document.getElementById('manage-btn');
+  manageBtn.onclick = () => {
+    const show = adminPanel.classList.contains('hidden');
+    adminPanel.classList.toggle('hidden', !show);
+    adminPanel.open = show;
+    if(show){ loadLeaders(); adminPanel.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+  };
   const leaderListEl = document.getElementById('leader-list');
   const leaderEmail = document.getElementById('leader-email');
   const leaderPw = document.getElementById('leader-pw');
@@ -772,9 +782,9 @@ const secAuth = getAuth(initializeApp(firebaseConfig, 'secondary'));
     trackerBody.classList.toggle('hidden', !signedIn);
     signoutBtn.classList.toggle('hidden', !signedIn);
     const isAdmin = signedIn && (user.email || '').toLowerCase() === ADMIN_EMAIL;
-    adminPanel.classList.toggle('hidden', !isAdmin);
+    adminPanel.classList.add('hidden');          // always starts hidden; the gear opens it
+    manageBtn.classList.toggle('hidden', !isAdmin);
     leaders = {}; confirmingLeader = null; setAdminMsg('');
-    if(isAdmin) loadLeaders();
     if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
     loaded = false;
     openId = null;
