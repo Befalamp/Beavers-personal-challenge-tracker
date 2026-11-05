@@ -1,6 +1,6 @@
 {
-  "name": "Beaver Personal Challenge Tracker",
-  "short_name": "Beavers",
+  "name": "Personal Challenge Tracker",
+  "short_name": "Challenges",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#eef7f6",
