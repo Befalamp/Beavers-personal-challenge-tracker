@@ -38,6 +38,14 @@
   }
   .header p{ margin:0; font-size:0.85rem; color:#5c7a77; font-weight:700; }
 
+  .tabs{ max-width:900px; margin:0 auto 14px; display:flex; gap:6px; }
+  .tab-btn{
+    flex:1; border:2px solid #cfe4e1; background:#fff; color:#5c7a77; border-radius:12px;
+    padding:10px 0; font-size:0.95rem; font-weight:800; font-family:inherit; cursor:pointer;
+  }
+  .tab-btn[data-active="true"]{ background:var(--teal); border-color:var(--teal); color:#fff; }
+  .tab-btn:focus-visible{ outline:2px solid var(--ink); outline-offset:2px; }
+
   .add-beaver-row{
     max-width:900px; margin:0 auto 16px; display:flex; gap:8px;
   }
@@ -186,6 +194,11 @@
   </div>
 
   <div id="tracker-body" class="hidden">
+    <div class="tabs" id="tabs">
+      <button class="tab-btn" data-section="beavers" type="button">Beavers</button>
+      <button class="tab-btn" data-section="cubs" type="button">Cubs</button>
+      <button class="tab-btn" data-section="scouts" type="button">Scouts</button>
+    </div>
     <div class="add-beaver-row">
       <input id="new-beaver-name" placeholder="Add a Beaver's name" />
       <button id="add-beaver-btn">+</button>
@@ -213,7 +226,18 @@ const auth = getAuth(initializeApp(firebaseConfig));
 
 (function(){
   const DB_URL = 'https://beaver-personal-challenge-default-rtdb.europe-west1.firebasedatabase.app';
-  const DATA_PATH = DB_URL + '/beaverChallengeData.json';
+  // Beavers stays on its original node so existing data is untouched.
+  const SECTIONS = {
+    beavers: { node: 'beaverChallengeData', singular: 'Beaver', plural: 'Beavers' },
+    cubs:    { node: 'cubsChallengeData',   singular: 'Cub',    plural: 'Cubs' },
+    scouts:  { node: 'scoutsChallengeData', singular: 'Scout',  plural: 'Scouts' }
+  };
+  let currentSection = 'beavers';
+  try{
+    const saved = localStorage.getItem('challenge-section');
+    if(saved && SECTIONS[saved]) currentSection = saved;
+  }catch(e){}
+  function dataPath(section){ return DB_URL + '/' + SECTIONS[section].node + '.json'; }
   const ACCENTS = ['#129c93','#5b7fd1','#d64545','#6fb04f','#3fa7d6','#2f4858','#8b6fd1','#7f8c8d'];
   let state = { beavers: [] };
   let openId = null;
@@ -231,11 +255,11 @@ const auth = getAuth(initializeApp(firebaseConfig));
   function uid(){ return 'b' + Math.random().toString(36).slice(2,9); }
   function accentFor(index){ return ACCENTS[index % ACCENTS.length]; }
 
-  async function authedUrl(){
+  async function authedUrl(section){
     const user = auth.currentUser;
     if(!user) throw new Error('not signed in');
     const token = await user.getIdToken();   // refreshed automatically when it expires
-    return DATA_PATH + '?auth=' + encodeURIComponent(token);
+    return dataPath(section) + '?auth=' + encodeURIComponent(token);
   }
 
   async function save(){
@@ -246,11 +270,14 @@ const auth = getAuth(initializeApp(firebaseConfig));
       return;
     }
     pendingSaves++;
+    // Capture section and data now, so switching tabs mid-save can't write to the wrong place.
+    const section = currentSection;
+    const body = JSON.stringify(state);
     try{
-      const res = await fetch(await authedUrl(), {
+      const res = await fetch(await authedUrl(section), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(state)
+        body
       });
       if(!res.ok) throw new Error('HTTP ' + res.status);
       if(statusMsg !== DEFAULT_MSG){
@@ -267,14 +294,17 @@ const auth = getAuth(initializeApp(firebaseConfig));
   }
 
   async function load(){
+    const section = currentSection;
     try{
-      const res = await fetch(await authedUrl());
+      const res = await fetch(await authedUrl(section));
       if(!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
+      if(section !== currentSection) return;   // tab changed while loading; discard
       if(data) state = Object.assign({ beavers: [] }, data);
       loaded = true;
       statusMsg = DEFAULT_MSG;
     }catch(e){
+      if(section !== currentSection) return;
       console.error('load failed', e);
       statusMsg = /HTTP (401|403)/.test(String(e.message))
         ? "This account isn't allowed to open the data — ask Beth to add you"
@@ -287,8 +317,13 @@ const auth = getAuth(initializeApp(firebaseConfig));
     const noteEl = document.getElementById('status-note');
     if(noteEl) noteEl.textContent = statusMsg;
 
+    Array.prototype.forEach.call(document.querySelectorAll('#tabs .tab-btn'), btn => {
+      btn.setAttribute('data-active', btn.getAttribute('data-section') === currentSection);
+    });
+    addInput.placeholder = "Add a " + SECTIONS[currentSection].singular + "'s name";
+
     if(state.beavers.length === 0){
-      listEl.innerHTML = '<div class="empty-state">No Beavers added yet 🦫<br>Add one above to get started</div>';
+      listEl.innerHTML = '<div class="empty-state">No ' + SECTIONS[currentSection].plural + ' added yet 🦫<br>Add one above to get started</div>';
       return;
     }
     listEl.innerHTML = '';
@@ -491,6 +526,22 @@ const auth = getAuth(initializeApp(firebaseConfig));
   resetBtn.onclick = doReset;
   pwInput.addEventListener('keydown', e => { if(e.key === 'Enter') doLogin(); });
   signoutBtn.onclick = () => { signOut(auth); };
+
+  document.getElementById('tabs').addEventListener('click', e => {
+    const btn = e.target.closest('button[data-section]');
+    if(!btn) return;
+    const next = btn.getAttribute('data-section');
+    if(next === currentSection) return;
+    currentSection = next;
+    try{ localStorage.setItem('challenge-section', currentSection); }catch(err){}
+    state = { beavers: [] };
+    loaded = false;
+    openId = null;
+    confirmingRemoveId = null;
+    statusMsg = 'Loading…';
+    render();
+    load();
+  });
 
   function poll(){
     if(pendingSaves > 0) return;
