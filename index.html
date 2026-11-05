@@ -182,6 +182,35 @@
     font-size:0.85rem; cursor:pointer; padding:6px 0; text-decoration:underline;
   }
   .signout-row{ text-align:center; margin-top:4px; }
+  .admin-wrap{
+    max-width:900px; margin:22px auto 0; background:#fff; border-radius:16px;
+    box-shadow:0 3px 0 var(--card-shadow); padding:4px 16px;
+  }
+  .admin-wrap summary{
+    cursor:pointer; font-family:'Baloo 2','Nunito',sans-serif; font-weight:800;
+    font-size:1.02rem; padding:12px 0; color:var(--ink);
+  }
+  .admin-body{ padding-bottom:14px; }
+  .leader-row{
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    padding:8px 0; border-bottom:1px solid var(--line); font-weight:700; font-size:0.9rem;
+  }
+  .leader-row span{ min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .admin-form{ display:flex; flex-direction:column; gap:8px; margin-top:12px; }
+  .admin-form input{
+    border:2px solid #cfe4e1; border-radius:12px; padding:10px 14px; font-size:0.95rem;
+    font-family:inherit; font-weight:700; color:var(--ink); background:#fff;
+  }
+  .admin-form input:focus{ outline:none; border-color:var(--teal); }
+  .admin-form button{
+    background:var(--teal); color:#fff; border:none; border-radius:12px; padding:11px;
+    font-weight:800; font-size:0.95rem; font-family:inherit; cursor:pointer;
+    box-shadow:0 3px 0 var(--teal-dark);
+  }
+  .admin-form button:disabled{ opacity:0.6; }
+  .admin-msg{ font-size:0.85rem; font-weight:700; min-height:1.2em; margin-top:8px; color:var(--danger); }
+  .admin-msg.ok{ color:var(--teal-dark); }
+  .admin-hint{ font-size:0.8rem; color:#5c7a77; font-weight:700; margin:10px 0 0; }
 </style>
 
 <div id="beaver-app">
@@ -214,6 +243,19 @@
 
     <div id="beaver-list" class="beaver-list"></div>
   </div>
+  <details id="admin-panel" class="admin-wrap hidden">
+    <summary>Leaders</summary>
+    <div class="admin-body">
+      <div id="leader-list"></div>
+      <div class="admin-form">
+        <input id="leader-email" type="email" inputmode="email" autocomplete="off" placeholder="New leader's email" />
+        <input id="leader-pw" type="text" autocomplete="off" placeholder="Temporary password (6+ characters)" />
+        <button id="leader-add-btn" type="button">Add leader</button>
+      </div>
+      <div id="admin-msg" class="admin-msg"></div>
+      <p class="admin-hint">They can change their password with "Forgot password?" on the sign-in screen.</p>
+    </div>
+  </details>
   <img class="footer-logo" src="ellesmere-logo.png" alt="Ellesmere Town Scouts">
   <div class="footer-note" id="status-note">Shared with signed-in leaders only</div>
   <div class="signout-row"><button id="signout-btn" class="link-btn hidden" type="button">Sign out</button></div>
@@ -221,7 +263,7 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail }
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail, createUserWithEmailAndPassword }
   from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 
 const firebaseConfig = {
@@ -231,6 +273,8 @@ const firebaseConfig = {
   appId: "1:581303881401:web:1843300f5876e7ad955568"
 };
 const auth = getAuth(initializeApp(firebaseConfig));
+// Second app instance, used only to create new logins without signing Beth out.
+const secAuth = getAuth(initializeApp(firebaseConfig, 'secondary'));
 
 (function(){
   const DB_URL = 'https://beaver-personal-challenge-default-rtdb.europe-west1.firebasedatabase.app';
@@ -586,6 +630,136 @@ const auth = getAuth(initializeApp(firebaseConfig));
     load();
   });
 
+  // ---- leaders (admin only) ----
+  const ADMIN_EMAIL = 'bethan.forrester@gmail.com';
+  const adminPanel = document.getElementById('admin-panel');
+  const leaderListEl = document.getElementById('leader-list');
+  const leaderEmail = document.getElementById('leader-email');
+  const leaderPw = document.getElementById('leader-pw');
+  const leaderAddBtn = document.getElementById('leader-add-btn');
+  const adminMsg = document.getElementById('admin-msg');
+  let leaders = {};
+  let confirmingLeader = null;
+
+  function setAdminMsg(text, ok){
+    adminMsg.textContent = text || '';
+    adminMsg.className = 'admin-msg' + (ok ? ' ok' : '');
+  }
+
+  async function leaderUrl(uid){
+    const token = await auth.currentUser.getIdToken();
+    return DB_URL + '/leaders' + (uid ? '/' + uid : '') + '.json?auth=' + encodeURIComponent(token);
+  }
+
+  function renderLeaders(){
+    leaderListEl.innerHTML = '';
+    const ids = Object.keys(leaders);
+    if(ids.length === 0){
+      const p = document.createElement('div');
+      p.className = 'leader-row';
+      p.textContent = 'No extra leaders yet';
+      leaderListEl.appendChild(p);
+      return;
+    }
+    ids.forEach(uid => {
+      const row = document.createElement('div');
+      row.className = 'leader-row';
+      const label = document.createElement('span');
+      label.textContent = (leaders[uid] && leaders[uid].email) || uid;
+      row.appendChild(label);
+      const zone = document.createElement('div');
+      zone.className = 'remove-zone';
+      if(confirmingLeader === uid){
+        const cancel = document.createElement('button');
+        cancel.className = 'icon-btn cancel'; cancel.textContent = 'Cancel';
+        cancel.onclick = () => { confirmingLeader = null; renderLeaders(); };
+        const ok = document.createElement('button');
+        ok.className = 'icon-btn confirm'; ok.textContent = 'Remove access';
+        ok.onclick = () => removeLeader(uid);
+        zone.appendChild(cancel); zone.appendChild(ok);
+      }else{
+        const rm = document.createElement('button');
+        rm.className = 'icon-btn remove'; rm.textContent = '✕';
+        rm.setAttribute('aria-label', 'Remove leader');
+        rm.onclick = () => { confirmingLeader = uid; renderLeaders(); };
+        zone.appendChild(rm);
+      }
+      row.appendChild(zone);
+      leaderListEl.appendChild(row);
+    });
+  }
+
+  async function loadLeaders(){
+    try{
+      const res = await fetch(await leaderUrl());
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      leaders = (await res.json()) || {};
+      renderLeaders();
+    }catch(e){
+      console.error('leaders load failed', e);
+      setAdminMsg("Couldn't load the leaders list — the Firebase rules may not include it yet");
+    }
+  }
+
+  async function addLeader(){
+    const email = leaderEmail.value.trim().toLowerCase();
+    const pw = leaderPw.value;
+    if(!email || pw.length < 6){ setAdminMsg('Enter an email and a password of at least 6 characters'); return; }
+    leaderAddBtn.disabled = true;
+    setAdminMsg('Adding…', true);
+    try{
+      let uid;
+      try{
+        uid = (await createUserWithEmailAndPassword(secAuth, email, pw)).user.uid;
+      }catch(e){
+        if(e && e.code === 'auth/email-already-in-use'){
+          // Already has a login: if the password given is theirs, we can still get the ID.
+          uid = (await signInWithEmailAndPassword(secAuth, email, pw)).user.uid;
+        }else throw e;
+      }
+      await signOut(secAuth);
+      const res = await fetch(await leaderUrl(uid), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, added: new Date().toISOString().slice(0,10) })
+      });
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      leaders[uid] = { email };
+      renderLeaders();
+      leaderEmail.value = ''; leaderPw.value = '';
+      setAdminMsg(email + ' can now sign in', true);
+    }catch(e){
+      console.error('add leader failed', e);
+      if(e && (e.code === 'auth/invalid-credential' || e.code === 'auth/wrong-password')){
+        setAdminMsg('That email already has a login, but not with that password');
+      }else if(e && e.code === 'auth/invalid-email'){
+        setAdminMsg("That doesn't look like an email address");
+      }else if(e && e.code === 'auth/weak-password'){
+        setAdminMsg('Password needs at least 6 characters');
+      }else if(/HTTP (401|403)/.test(String(e && e.message))){
+        setAdminMsg("Login created, but the leaders list wouldn't save — the Firebase rules need updating");
+      }else{
+        setAdminMsg("Couldn't add them — check your connection and try again");
+      }
+    }
+    leaderAddBtn.disabled = false;
+  }
+
+  async function removeLeader(uid){
+    try{
+      const res = await fetch(await leaderUrl(uid), { method: 'DELETE' });
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      delete leaders[uid];
+      confirmingLeader = null;
+      renderLeaders();
+      setAdminMsg('Access removed', true);
+    }catch(e){
+      console.error('remove leader failed', e);
+      setAdminMsg("Couldn't remove them — try again");
+    }
+  }
+  leaderAddBtn.onclick = addLeader;
+
   function poll(){
     if(pendingSaves > 0) return;
     if(document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT')) return;
@@ -597,6 +771,10 @@ const auth = getAuth(initializeApp(firebaseConfig));
     loginPanel.classList.toggle('hidden', signedIn);
     trackerBody.classList.toggle('hidden', !signedIn);
     signoutBtn.classList.toggle('hidden', !signedIn);
+    const isAdmin = signedIn && (user.email || '').toLowerCase() === ADMIN_EMAIL;
+    adminPanel.classList.toggle('hidden', !isAdmin);
+    leaders = {}; confirmingLeader = null; setAdminMsg('');
+    if(isAdmin) loadLeaders();
     if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
     loaded = false;
     openId = null;
