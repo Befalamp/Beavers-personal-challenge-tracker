@@ -108,6 +108,16 @@
   }
   .beaver-card.open .beaver-body{ display:block; }
 
+  .task-head{ display:flex; gap:8px; align-items:center; margin-bottom:6px; }
+  .task-head .task-name-input{ flex:1; min-width:0; margin-bottom:0; width:auto; }
+  .weeks-select{
+    border:2px solid #cfe4e1; border-radius:10px; background:#fff; color:var(--ink);
+    font-family:inherit; font-size:0.8rem; font-weight:800; padding:5px 6px; flex-shrink:0;
+  }
+  .weeks-select:focus{ outline:none; border-color:var(--teal); }
+  .week-tick.oneoff{ aspect-ratio:auto; height:58px; font-size:1.6rem; }
+  .week-tick.oneoff .wk-num{ font-size:0.7rem; }
+
   .task-name-input{
     width:100%; border:none; border-bottom:2px solid #eee; background:transparent;
     font-size:0.86rem; font-weight:700; color:var(--ink); padding:6px 2px;
@@ -119,6 +129,8 @@
   .challenge-block{ margin-top:12px; }
   .challenge-block:first-child{ margin-top:6px; }
   .week-row{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+  .week-row.cols-1{ grid-template-columns:1fr; }
+  .week-row.cols-3{ grid-template-columns:repeat(3,1fr); }
   .week-tick{
     aspect-ratio:1; border-radius:12px; border:2px solid var(--line); background:#f8faf7;
     display:flex; align-items:center; justify-content:center; font-size:1.25rem; font-weight:800;
@@ -330,7 +342,7 @@ const auth = getAuth(initializeApp(firebaseConfig));
     state.beavers.forEach((b, idx) => {
       const c1Done = b.c1.filter(Boolean).length;
       const c2Done = b.c2.filter(Boolean).length;
-      const allDone = c1Done === 4 && c2Done === 4;
+      const allDone = c1Done === b.c1.length && c2Done === b.c2.length;
       const isOpen = openId === b.id;
       const isConfirming = confirmingRemoveId === b.id;
 
@@ -355,12 +367,12 @@ const auth = getAuth(initializeApp(firebaseConfig));
 
       const dots = document.createElement('div');
       dots.className = 'progress-dots';
-      for(let i=0;i<4;i++){
+      for(let i=0;i<b.c1.length;i++){
         const d = document.createElement('span');
         if(i < c1Done) d.className = 'filled-c1';
         dots.appendChild(d);
       }
-      for(let i=0;i<4;i++){
+      for(let i=0;i<b.c2.length;i++){
         const d = document.createElement('span');
         if(i < c2Done) d.className = 'filled-c2';
         dots.appendChild(d);
@@ -423,21 +435,56 @@ const auth = getAuth(initializeApp(firebaseConfig));
     const block = document.createElement('div');
     block.className = 'challenge-block';
 
+    const head = document.createElement('div');
+    head.className = 'task-head';
     const input = document.createElement('input');
     input.className = 'task-name-input ' + key;
     input.placeholder = key === 'c1' ? 'Challenge 1 name' : 'Challenge 2 name';
     input.value = beaver[key + 'Name'] || '';
     input.addEventListener('click', e => e.stopPropagation());
     input.addEventListener('change', () => { beaver[key + 'Name'] = input.value; save(); });
-    block.appendChild(input);
+    head.appendChild(input);
+
+    const len = beaver[key].length;
+    const sel = document.createElement('select');
+    sel.className = 'weeks-select';
+    sel.setAttribute('aria-label', 'Length of challenge');
+    [1,4,5,6,7,8].forEach(n => {
+      const o = document.createElement('option');
+      o.value = n;
+      o.textContent = n === 1 ? 'One-off' : n + ' weeks';
+      sel.appendChild(o);
+    });
+    if(![1,4,5,6,7,8].includes(len)){
+      const o = document.createElement('option');
+      o.value = len; o.textContent = len + ' weeks';
+      sel.appendChild(o);
+    }
+    sel.value = String(len);
+    sel.addEventListener('click', e => e.stopPropagation());
+    sel.addEventListener('change', () => {
+      const n = parseInt(sel.value, 10);
+      const arr = beaver[key];
+      if(n < arr.length && arr.slice(n).some(Boolean)){
+        statusMsg = "Can't shorten it — there are ticks in the weeks that would be removed. Untick them first";
+        render();
+        return;
+      }
+      beaver[key] = n > arr.length
+        ? arr.concat(new Array(n - arr.length).fill(false))
+        : arr.slice(0, n);
+      save(); render();
+    });
+    head.appendChild(sel);
+    block.appendChild(head);
 
     const row = document.createElement('div');
-    row.className = 'week-row';
-    for(let i=0;i<4;i++){
+    row.className = 'week-row' + (len === 1 ? ' cols-1' : (len === 5 || len === 6 ? ' cols-3' : ''));
+    for(let i=0;i<len;i++){
       const cell = document.createElement('div');
       const ticked = beaver[key][i];
-      cell.className = 'week-tick' + (ticked ? ' ticked ' + key : '');
-      cell.innerHTML = '<span class="wk-num">Wk' + (i+1) + '</span>' + (ticked ? '✓' : '');
+      cell.className = 'week-tick' + (len === 1 ? ' oneoff' : '') + (ticked ? ' ticked ' + key : '');
+      cell.innerHTML = '<span class="wk-num">' + (len === 1 ? 'Done' : 'Wk' + (i+1)) + '</span>' + (ticked ? '✓' : '');
       cell.onclick = (e) => {
         e.stopPropagation();
         beaver[key][i] = !beaver[key][i];
@@ -545,7 +592,7 @@ const auth = getAuth(initializeApp(firebaseConfig));
 
   function poll(){
     if(pendingSaves > 0) return;
-    if(document.activeElement && document.activeElement.tagName === 'INPUT') return;
+    if(document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT')) return;
     load();
   }
 
