@@ -215,7 +215,7 @@
 
 <div id="beaver-app">
   <div class="header">
-    <div class="kicker"><img src="beavers-logo.png" alt="Beavers"></div>
+    <div class="kicker"><img id="section-logo" src="beavers-logo.png" alt="Beavers"></div>
     <h1>Personal Challenge Tracker</h1>
     <p>Tap a name to open it, tap a week once it's done</p>
   </div>
@@ -283,9 +283,9 @@ const secAuth = getAuth(initializeApp(firebaseConfig, 'secondary'));
   const DB_URL = 'https://beaver-personal-challenge-default-rtdb.europe-west1.firebasedatabase.app';
   // Beavers stays on its original node so existing data is untouched.
   const SECTIONS = {
-    beavers: { node: 'beaverChallengeData', singular: 'Beaver', plural: 'Beavers' },
-    cubs:    { node: 'cubsChallengeData',   singular: 'Cub',    plural: 'Cubs' },
-    scouts:  { node: 'scoutsChallengeData', singular: 'Scout',  plural: 'Scouts' }
+    beavers: { logo: 'beavers-logo.png', node: 'beaverChallengeData', singular: 'Beaver', plural: 'Beavers' },
+    cubs:    { logo: 'cubs-logo.png',    node: 'cubsChallengeData',   singular: 'Cub',    plural: 'Cubs' },
+    scouts:  { logo: 'scouts-logo.png',  node: 'scoutsChallengeData', singular: 'Scout',  plural: 'Scouts' }
   };
   let currentSection = 'beavers';
   try{
@@ -375,6 +375,12 @@ const secAuth = getAuth(initializeApp(firebaseConfig, 'secondary'));
     Array.prototype.forEach.call(document.querySelectorAll('#tabs .tab-btn'), btn => {
       btn.setAttribute('data-active', btn.getAttribute('data-section') === currentSection);
     });
+    const logoEl = document.getElementById('section-logo');
+    const logoSrc = SECTIONS[currentSection].logo;
+    if(logoEl.getAttribute('src') !== logoSrc){
+      logoEl.setAttribute('src', logoSrc);
+      logoEl.alt = SECTIONS[currentSection].plural;
+    }
     addInput.placeholder = "Add a " + SECTIONS[currentSection].singular + "'s name";
 
     if(state.beavers.length === 0){
